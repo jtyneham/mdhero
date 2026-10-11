@@ -1,7 +1,8 @@
 import { get } from "svelte/store";
 import { tabStore, type Tab, HOME_TAB_ID } from "../stores/tabs";
 import { renderFull } from "../renderer/pipeline";
-import { openFile } from "./files";
+import { openFile, getBaseDir } from "./files";
+import { document as documentStore } from "../stores/document";
 import { isAndroid } from "../utils/platform";
 import { showToast } from "../stores/toast";
 import { native } from "./android";
@@ -73,5 +74,15 @@ export async function restoreMobileDrafts(): Promise<void> {
       paths.set(snapshot.filePath, tab.id);
     }
     tabStore.switchTab(session.activePath ? paths.get(session.activePath) ?? HOME_TAB_ID : HOME_TAB_ID);
+    // The last restored tab may already be active. The page's tab-switch effect
+    // only reacts to a changed ID, so explicitly repaint its restored draft.
+    const active = tabStore.getActiveTab();
+    if (active) {
+      const content = active.dirty ? active.editContent : active.content;
+      const result = renderFull(content, getBaseDir(active.filePath));
+      documentStore.set({ filePath: active.filePath, fileName: active.fileName, content,
+        renderedHtml: result.html, frontmatter: result.frontmatter, wordCount: result.wordCount,
+        loading: false, error: null });
+    }
   } finally { restoring = false; persistDrafts(); }
 }

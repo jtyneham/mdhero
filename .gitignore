@@ -22,6 +22,7 @@ src-tauri/plugins/**/target/
 *.jks
 /artifacts/
 artifacts-*.log
+tests/android-provider/.gradle/
 *.stackdump
 FEATURES.md
 

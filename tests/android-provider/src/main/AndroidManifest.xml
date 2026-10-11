@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="MDHero provider regression" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:allowBackup="false">
+        <activity android:name=".OpenActivity" android:exported="true" />
+        <provider android:name=".FixtureProvider" android:authorities="com.mdhero.providerfixture" android:exported="false" android:grantUriPermissions="true" />
+    </application>
+</manifest>

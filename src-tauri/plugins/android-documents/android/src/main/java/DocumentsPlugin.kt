@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
@@ -16,6 +17,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResult
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -62,6 +65,12 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
         (activity as AppCompatActivity).onBackPressedDispatcher.addCallback(activity, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { view.evaluateJavascript("window.dispatchEvent(new Event('mdhero-back'))", null) }
         })
+        // Tauri 2.11 generates a process observer but does not register it.
+        // Observe this activity directly, including quick switches and pickers.
+        activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) { this@DocumentsPlugin.onResume() }
+            override fun onPause(owner: LifecycleOwner) { this@DocumentsPlugin.onPause() }
+        })
         receiveIntent(activity.intent)
     }
     override fun onNewIntent(intent: Intent) { receiveIntent(intent) }
@@ -98,7 +107,8 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
             synchronized(pendingUris) { if (!pendingUris.contains(uri.toString())) pendingUris.add(uri.toString()) }
         }
         if (::view.isInitialized) view.post { view.evaluateJavascript("window.dispatchEvent(new Event('mdhero-open'))", null) }
-        intent.action = null
+        // Do not mutate Activity.intent: Android/framework lifecycle code can
+        // reuse it when returning to a task. This queue consumes deliveries.
     }
     private fun remember(uri: Uri, flags: Int) {
         require(uri.scheme == "content") { "Only user-selected content URIs are supported" }
@@ -114,12 +124,26 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
         return uri
     }
     private fun name(uri: Uri): String {
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) return it.getString(0) }
-        throw IllegalStateException("Document is unavailable. Select it again to renew access.")
+        try {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                val column = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (column >= 0 && it.moveToFirst() && !it.isNull(column)) {
+                    val value = it.getString(column)
+                    if (!value.isNullOrBlank()) return value
+                }
+            }
+        } catch (_: RuntimeException) {
+            // Open With providers may omit metadata or reject projections.
+            // The actual stream operation below still enforces OS access.
+        }
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "Untitled.md"
     }
     private fun textUri(value: String): Uri {
         val uri = authorized(value)
-        require(name(uri).substringAfterLast('.', "").lowercase() in textExtensions) { "Choose a Markdown or text document" }
+        val displayName = name(uri)
+        val extension = displayName.substringAfterLast('.', "").lowercase()
+        val mime = try { resolver.getType(uri)?.substringBefore(';')?.lowercase() } catch (_: RuntimeException) { null }
+        require(extension in textExtensions || (extension.isEmpty() && mime in setOf("text/markdown", "text/x-markdown", "text/plain", "application/markdown"))) { "Choose a Markdown or text document" }
         return uri
     }
     private fun java.io.InputStream.readLimited(limit: Int): ByteArray {
@@ -139,9 +163,17 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
         .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(data)).toString()
     private fun readText(uri: Uri): String = decode(bytes(uri, 64 * 1024 * 1024))
     private fun info(uri: Uri): JSObject {
-        var writable = false
-        resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use {
-            if (it.moveToFirst()) writable = it.getInt(0) and DocumentsContract.Document.FLAG_SUPPORTS_WRITE != 0
+        var writable = activity.checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(), Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        // COLUMN_FLAGS belongs to DocumentsProvider, not every content URI.
+        // FileProvider commonly returns a zero-column cursor for this query.
+        if (DocumentsContract.isDocumentUri(activity, uri)) try {
+            resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use {
+                val column = it.getColumnIndex(DocumentsContract.Document.COLUMN_FLAGS)
+                if (column >= 0 && it.moveToFirst() && !it.isNull(column))
+                    writable = writable && it.getInt(column) and DocumentsContract.Document.FLAG_SUPPORTS_WRITE != 0
+            }
+        } catch (_: RuntimeException) {
+            // Optional capabilities cannot make an otherwise readable file fail.
         }
         return JSObject().apply {
             put("uri", uri.toString()); put("name", name(uri)); put("writable", writable)
@@ -198,7 +230,13 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
     }
     @Command fun stat(invoke: Invoke) {
         val args = invoke.parseArgs(DocumentArgs::class.java)
-        work(invoke) { info(textUri(args.uri)) }
+        work(invoke) {
+            val uri = textUri(args.uri)
+            // Metadata can be absent even for readable files. Check the actual
+            // stream so fallback names cannot disguise missing/revoked access.
+            resolver.openInputStream(uri)?.use { } ?: throw IllegalStateException("Document is unavailable. Select it again to renew access.")
+            info(uri)
+        }
     }
     @Command fun write(invoke: Invoke) {
         val args = invoke.parseArgs(DocumentArgs::class.java)

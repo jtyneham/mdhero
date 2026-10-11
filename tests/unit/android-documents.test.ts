@@ -62,4 +62,40 @@ describe("Android content URIs", () => {
     const { pathExists } = await import("../../src/lib/tauri/files");
     expect(await pathExists("content://p/id")).toBe(false);
   });
+  it("repaints a restored preview even when the final tab is already active", async () => {
+    const { tabStore } = await import("../../src/lib/stores/tabs");
+    const id = tabStore.addTab("content://p/empty", "empty.md", "", "");
+    const snapshot = { ...tabStore.getActiveTab()!, editContent: "# Durable draft", dirty: true, isEditing: false };
+    tabStore.closeTab(id);
+    invoke.mockImplementation(async (_command, args) => {
+      if (args.action === "draftLoad") return { content: JSON.stringify({ tabs: [snapshot], activePath: snapshot.filePath }) };
+      if (args.action === "read") return { uri: snapshot.filePath, name: "empty.md", content: "" };
+      return {};
+    });
+    const { restoreMobileDrafts } = await import("../../src/lib/tauri/drafts");
+    await restoreMobileDrafts();
+    const { document } = await import("../../src/lib/stores/document");
+    expect(tabStore.getActiveTab()?.dirty).toBe(true);
+    expect(tabStore.getActiveTab()?.isEditing).toBe(false);
+    expect(get(document).content).toBe("# Durable draft");
+    expect(get(document).renderedHtml).toBe("# Durable draft");
+  });
+  it("repaints the recovered draft when an external grant has expired", async () => {
+    const { tabStore } = await import("../../src/lib/stores/tabs");
+    const id = tabStore.addTab("content://p/revoked", "lost.md", "old", "old");
+    const snapshot = { ...tabStore.getActiveTab()!, editContent: "# Keep my edits", dirty: true, isEditing: false };
+    tabStore.closeTab(id);
+    invoke.mockImplementation(async (_command, args) => {
+      if (args.action === "draftLoad") return { content: JSON.stringify({ tabs: [snapshot], activePath: snapshot.filePath }) };
+      if (args.action === "read") throw new Error("Permission revoked");
+      return {};
+    });
+    const { restoreMobileDrafts } = await import("../../src/lib/tauri/drafts");
+    await restoreMobileDrafts();
+    const { document } = await import("../../src/lib/stores/document");
+    expect(get(document).filePath).toMatch(/^new:\/\/recovered-/);
+    expect(get(document).content).toBe("# Keep my edits");
+    expect(get(document).error).toBeNull();
+    expect(tabStore.getActiveTab()?.dirty).toBe(true);
+  });
 });

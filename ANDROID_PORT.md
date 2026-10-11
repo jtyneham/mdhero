@@ -140,3 +140,16 @@ build and renderer parity tests pass.
 
 See ANDROID_BUILD.md for reproducible builds/signing and ANDROID_TESTING.md for
 what was actually verified, including limits of emulator-only validation.
+
+External file managers can supply ordinary content-provider URIs rather than
+DocumentsProvider URIs. Display metadata is optional and queried by column name;
+document flags are queried only for DocumentsProvider URIs. Actual OS grants and
+stream access remain authoritative. Missing names can use a URI label with a
+supported text MIME type. Files stay bound to their original URI.
+
+The document bridge observes MainActivity lifecycle directly so every pause and
+resume reaches draft persistence and document refresh, including quick app
+switches. MainActivity retains the current intent; deliveries are consumed by
+the plugin queue without clearing Android's intent action. Focus restoration
+resumes/invalidates the existing WebView surface. Draft restoration explicitly
+repaints the active preview even if its tab ID has not changed.

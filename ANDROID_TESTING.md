@@ -1,15 +1,17 @@
 # Android verification
 
 Executed locally on 2026-10-11. The delivered APK was built from this fork, not
-from a demo server. It was installed and launched in a dedicated, headless
-`MDHero_Port_API36` Android 16 / API 36 Google APIs x86_64 emulator.
+from a demo server. Initial validation used a dedicated, headless
+`MDHero_Port_API36` Android 16 / API 36 Google APIs x86_64 emulator. The Open With
+replacement APK was installed and verified in `MDHero_OpenWith_API37`, a separate
+Android 17 / API 37 Google APIs x86_64 emulator.
 
 ## Automated results
 
 | Check | Result |
 | --- | --- |
 | `npm run check` | 0 errors; 6 non-blocking existing component warnings |
-| `npm test` | 26 files, 212 tests passed |
+| `npm test` | 26 files, 214 tests passed |
 | Desktop `cargo check --lib` | Passed |
 | `cargo test --lib --test menu_window` | 21 Rust tests passed; Windows menu integration assertions passed |
 | Native `DocumentPolicyTest` | 6 JUnit tests passed, 0 failures/errors |
@@ -57,8 +59,10 @@ Back cancellation retaining edits, the share chooser, native Print / Save PDF,
 and native Save As cancellation. The script restores the emulator's display,
 font and rotation settings on completion.
 
-The final installed APK passed all **38** scripted emulator assertions (24
-document/rendering checks and 14 layout/native checks).
+The final installed APK passed all **38** scripted document/layout assertions
+(24 document/rendering checks and 14 layout/native checks) on API 37, in addition
+to the 20 external-provider/lifecycle assertions below. The original API 36
+validation also passed the 38 document/layout assertions.
 
 Additional completed provider operations:
 
@@ -105,6 +109,43 @@ assume English and the standard Google DocumentsUI provider.
 Logs, JSON results, screenshots and the test PDF are local ignored `artifacts/`
 outputs. Android build JUnit XML is under the plugin's ignored `android/build/`.
 
+## Open With and return-to-app regression (2026-10-11)
+
+A Pixel 9a / Android 17 / Files by Google 1.12735 report exposed a provider
+compatibility error. The exact `Couldn't read row 0, col 0 from CursorWindow`
+message was reproduced with a separate provider that ignores DocumentsProvider
+`COLUMN_FLAGS`. The native bridge now checks returned column names, treats
+metadata as optional, and uses actual OS URI grants for write capability.
+Reading/stat/writing still require real provider stream access. Opaque names
+can be accepted with a supported text MIME type; no private copy is substituted.
+
+The current Tauri activity defines but does not register its plugin process
+lifecycle observer. The document plugin now observes the activity directly for
+pause/resume. MainActivity retains the latest intent, and the plugin no longer
+clears its action. Window focus restores the WebView's resumed state/layout and
+invalidates its surface without reloading or discarding edits.
+
+Real background process eviction also exposed a stale Reader preview after
+restoring the final active dirty tab. Restoration now explicitly repaints the
+active draft. Two frontend tests cover this and expired-grant recovery.
+
+`tests/android-provider` builds a separately installed fixture APK, excluded
+from MDHero. `scripts/android-open-with-smoke.mjs` exercises cold/warm Open With,
+ACTION_SEND, absent/empty/unsupported metadata, real read-only grants and
+same-URI writes, quick/full app switches, recovery after an unavailable source,
+and background process eviction without force-stopping to recover. Its README
+contains build/install instructions. The fixture reproduced the original error
+on API 36; the fix also runs on a dedicated Android 17 / API 37 emulator.
+The final APK passed all **20** provider/lifecycle assertions on API 37,
+including recovery after a real background app-process kill. The earlier API 36
+run passed the initial 14 checks; the expanded recovery cases were added during
+API 37 testing. The new two frontend tests bring the suite to 214.
+
+The physical Pixel and exact Files by Google build are not connected here. The
+reported full black screen was not reproduced on the emulator; activity/resume
+and dirty-preview recovery failures were reproduced and corrected. Device
+confirmation remains necessary for any device/WebView-specific surface issue.
+
 ## Delivered artifact
 
 ```
@@ -114,18 +155,21 @@ C:\Users\Haizara H5\Documents\GitHub\mdhero\artifacts\MDHero-Android-debug.apk
 57,607,177 bytes (about 55 MiB). SHA-256:
 
 ```
-7c67ecec4549cac6a7e1eb32edb5647a4428b3d01c9907c70ad6dd5fe9c4c2a9
+0b197e05f72d70d71250a2996f23d9cbad1f654f5e2ecd259acde93148930bcf
 ```
 
 This debug-signed universal APK includes embedded frontend assets and both
 ARM64 phone and x86_64 emulator libraries. Packaging copies are stripped; Cargo
 debug symbols remain in ignored local build directories.
+An identical copy is delivered as `artifacts/MDHero-Android-open-with-fix.apk`
+to distinguish it from the original APK. Both hashes and signatures were
+verified; installation over the prior build succeeded without clearing data.
 
 ## Validation limits and platform differences
 
 - Runtime verification used x86_64 emulation. ARM64 compiled and is present in
   the signed APK, but no physical ARM64 phone was available for execution.
-- Minimum Android API 26 compatibility is configured; only API 36 was exercised.
+- Minimum Android API 26 compatibility is configured; API 36 and API 37 were exercised.
   Third-party/cloud document providers and OEM keyboards/printers need device
   testing beyond the stock provider and keyboard used here.
 - Predictive Back dispatch is enabled through AndroidX; custom animated previews
@@ -149,7 +193,8 @@ debug symbols remain in ignored local build directories.
   workflow now installs `platform-tools` explicitly. The corrected
   [CI run](https://github.com/jtyneham/mdhero/actions/runs/38154581877) passed
   frontend checks/tests, both native builds, JUnit tests and APK upload. The local
-  delivery APK additionally includes the final navigation-bar inset adjustment.
+  delivery APK additionally includes the navigation-bar inset adjustment and
+  Open With/lifecycle/draft-preview corrections documented above.
 
 Build, signing and installation details are in ANDROID_BUILD.md. Design and
 security boundaries are documented in ANDROID_PORT.md.
