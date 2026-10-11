@@ -1,0 +1,6 @@
+{
+  "identifier": "android-capability",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["core:default", "opener:default", "dialog:default", "dialog:allow-ask", "android-documents:default"]
+}

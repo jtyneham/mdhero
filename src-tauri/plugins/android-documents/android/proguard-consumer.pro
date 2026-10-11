@@ -1,0 +1,3 @@
+-keep class com.mdhero.documents.DocumentsPlugin { *; }
+-keep class com.mdhero.documents.DocumentArgs { *; }
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault

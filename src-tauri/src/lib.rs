@@ -1,8 +1,12 @@
+#[cfg(desktop)]
 mod commands;
+#[cfg(desktop)]
 pub mod menu;
+#[cfg(desktop)]
 mod watcher;
 
 use std::sync::Mutex;
+#[cfg(desktop)]
 use tauri::Manager;
 
 /// Stores file paths received from OS "Open With" events.
@@ -67,15 +71,21 @@ fn parse_mdhero_url(url: &tauri::Url) -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(OpenedFiles::default());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_android_documents::init());
+    #[cfg(mobile)]
+    let builder = builder.invoke_handler(tauri::generate_handler![get_opened_files]);
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_cli::init())
         .manage(watcher::WatcherState::default())
-        .manage(OpenedFiles::default())
         .invoke_handler(tauri::generate_handler![
             commands::read_markdown_file,
             commands::write_markdown_file,
@@ -90,79 +100,86 @@ pub fn run() {
             watcher::unwatch_file,
             watcher::stop_watching,
             get_opened_files,
-        ])
+        ]);
+    builder
         .setup(|app| {
-            let handle = app.handle().clone();
-            let menu = menu::create_menu(&handle)?;
-            app.set_menu(menu)?;
+            #[cfg(desktop)]
+            {
+                let handle = app.handle().clone();
+                let menu = menu::create_menu(&handle)?;
+                app.set_menu(menu)?;
 
-            // Red-button (window) close routes through the frontend quit guard
-            // instead of closing, so unsaved changes get a confirm dialog (#54).
-            // Cmd+Q / menu Quit go through the custom "quit" menu event above.
-            // quit_app (AppHandle::exit) is a hard exit that bypasses this, so a
-            // confirmed quit can't loop back here.
-            if let Some(main_window) = app.get_webview_window("main") {
-                let quit_win = main_window.clone();
-                main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = quit_win.eval("window.__mdhero_quit?.()");
+                // Red-button (window) close routes through the frontend quit guard
+                // instead of closing, so unsaved changes get a confirm dialog (#54).
+                // Cmd+Q / menu Quit go through the custom "quit" menu event above.
+                // quit_app (AppHandle::exit) is a hard exit that bypasses this, so a
+                // confirmed quit can't loop back here.
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let quit_win = main_window.clone();
+                    main_window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            api.prevent_close();
+                            let _ = quit_win.eval("window.__mdhero_quit?.()");
+                        }
+                    });
+                }
+
+                app.on_menu_event(move |app_handle, event| {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let id = event.id().as_ref();
+                        match id {
+                            "open" => {
+                                let _ = window.eval("window.__mdhero_open_file?.()");
+                            }
+                            "paste_md" => {
+                                let _ = window.eval("window.__mdhero_paste?.()");
+                            }
+                            "theme" => {
+                                let _ = window.eval("window.__mdhero_toggle_theme?.()");
+                            }
+                            "find" => {
+                                let _ = window.eval("window.__mdhero_find?.()");
+                            }
+                            "close" => {
+                                let _ = window.eval("window.__mdhero_close_tab?.()");
+                            }
+                            "print" => {
+                                let _ = window.eval("window.__mdhero_print?.()");
+                            }
+                            "check_updates" => {
+                                let _ = window.eval("window.__mdhero_check_updates?.()");
+                            }
+                            "about" => {
+                                let _ = window.eval("window.__mdhero_about?.()");
+                            }
+                            "quit" => {
+                                let _ = window.eval("window.__mdhero_quit?.()");
+                            }
+                            // AI lookup right-click menu items — forward the
+                            // structured ID to the frontend router. JSON-stringify
+                            // the ID so embedded colons (and any future special
+                            // chars) survive the eval boundary cleanly.
+                            s if s.starts_with("aimenu:") => {
+                                let js = format!(
+                                    "window.__mdhero_ai_lookup?.({})",
+                                    serde_json::json!(s)
+                                );
+                                let _ = window.eval(&js);
+                            }
+                            _ => {}
+                        }
                     }
                 });
             }
-
-            app.on_menu_event(move |app_handle, event| {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let id = event.id().as_ref();
-                    match id {
-                        "open" => {
-                            let _ = window.eval("window.__mdhero_open_file?.()");
-                        }
-                        "paste_md" => {
-                            let _ = window.eval("window.__mdhero_paste?.()");
-                        }
-                        "theme" => {
-                            let _ = window.eval("window.__mdhero_toggle_theme?.()");
-                        }
-                        "find" => {
-                            let _ = window.eval("window.__mdhero_find?.()");
-                        }
-                        "close" => {
-                            let _ = window.eval("window.__mdhero_close_tab?.()");
-                        }
-                        "print" => {
-                            let _ = window.eval("window.__mdhero_print?.()");
-                        }
-                        "check_updates" => {
-                            let _ = window.eval("window.__mdhero_check_updates?.()");
-                        }
-                        "about" => {
-                            let _ = window.eval("window.__mdhero_about?.()");
-                        }
-                        "quit" => {
-                            let _ = window.eval("window.__mdhero_quit?.()");
-                        }
-                        // AI lookup right-click menu items — forward the
-                        // structured ID to the frontend router. JSON-stringify
-                        // the ID so embedded colons (and any future special
-                        // chars) survive the eval boundary cleanly.
-                        s if s.starts_with("aimenu:") => {
-                            let js =
-                                format!("window.__mdhero_ai_lookup?.({})", serde_json::json!(s));
-                            let _ = window.eval(&js);
-                        }
-                        _ => {}
-                    }
-                }
-            });
-
+            #[cfg(mobile)]
+            let _ = app;
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|_app_handle, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = event {
+            if let tauri::RunEvent::Opened { urls } = _event {
                 let app_handle = _app_handle;
                 let mut file_paths: Vec<String> = Vec::new();
 

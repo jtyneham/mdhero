@@ -1,0 +1,6 @@
+{
+  "identifier": "com.mdhero.android.personal",
+  "build": {"beforeBuildCommand": "npm run build", "beforeDevCommand": "npm run dev"},
+  "bundle": {"android": {"minSdkVersion": 26}},
+  "app": {"windows": [{"label": "main", "title": "MDHero"}]}
+}

@@ -1,0 +1,16 @@
+[package]
+name = "tauri-plugin-android-documents"
+version = "0.1.0"
+authors = [ "MDHero contributors" ]
+description = "User-granted Android documents and native MDHero integrations"
+edition = "2021"
+rust-version = "1.77.2"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+links = "tauri-plugin-android-documents"
+
+[dependencies]
+tauri = { version = "2.11.3" }
+serde_json = "1"
+
+[build-dependencies]
+tauri-plugin = { version = "2.6.3", features = ["build"] }

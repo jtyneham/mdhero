@@ -11,7 +11,17 @@ vite.config.ts.timestamp-*
 
 # Rust
 src-tauri/target/
-src-tauri/gen/
+src-tauri/gen/*
+!src-tauri/gen/android/
+src-tauri/gen/android/.tauri/
+src-tauri/gen/android/**/build/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/local.properties
+src-tauri/plugins/**/target/
+*.keystore
+*.jks
+/artifacts/
+artifacts-*.log
 *.stackdump
 FEATURES.md
 
