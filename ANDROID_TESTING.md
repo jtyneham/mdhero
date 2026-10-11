@@ -62,6 +62,16 @@ document/rendering checks and 14 layout/native checks).
 
 Additional completed provider operations:
 
+- Android's real file manager and Open With chooser opened `external.txt` in
+  MDHero. Its provider grant permitted an exact-byte original-file write.
+- Explicit public HTTPS loading downloaded Markdown through the native bridge.
+- Moving an open source file, then force-stopping/restarting, restored its draft
+  as a dirty `new://recovered-…` document with Save As available.
+- With emulator Wi-Fi/data disabled, local Markdown, KaTeX, Mermaid and the
+  granted-folder image still rendered successfully.
+- A 460,024-character new document was edited and atomically backed up in
+  1,164 ms including the 800 ms test debounce wait; its 5,000-paragraph preview
+  rendered successfully. This is a smoke performance check, not a benchmark.
 - Save As created `guide-copy.md` in the selected folder with the unsaved draft,
   rebound the active content URI and cleared its dirty indicator.
 - Android Save as PDF exported `mdhero-verification.pdf`: 209,792 bytes, valid
@@ -104,7 +114,7 @@ C:\Users\Haizara H5\Documents\GitHub\mdhero\artifacts\MDHero-Android-debug.apk
 57,607,177 bytes (about 55 MiB). SHA-256:
 
 ```
-d159a3ccc85a458272d3b1d6a7a2417e1bfb2ee623e66630b689a864e14b2871
+7c67ecec4549cac6a7e1eb32edb5647a4428b3d01c9907c70ad6dd5fe9c4c2a9
 ```
 
 This debug-signed universal APK includes embedded frontend assets and both
@@ -134,7 +144,12 @@ debug symbols remain in ignored local build directories.
   execution and cloud/OEM provider interoperability were not tested. Desktop
   unit/compilation and the Windows menu checks passed.
 - The GitHub Actions workflow is supplied as a second reproducible build path;
-  local APK delivery does not depend on a successful CI run.
+  local APK delivery does not depend on a successful CI run. The first run failed
+  because setup-android's default requested the removed `tools` SDK package. The
+  workflow now installs `platform-tools` explicitly. The corrected
+  [CI run](https://github.com/jtyneham/mdhero/actions/runs/38154581877) passed
+  frontend checks/tests, both native builds, JUnit tests and APK upload. The local
+  delivery APK additionally includes the final navigation-bar inset adjustment.
 
 Build, signing and installation details are in ANDROID_BUILD.md. Design and
 security boundaries are documented in ANDROID_PORT.md.

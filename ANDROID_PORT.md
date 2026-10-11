@@ -108,6 +108,8 @@ The toolbar's measured height accommodates font/display scaling. Android system
 font scale is applied to WebView text, and all original reading preferences are
 still available. Font/density configuration changes are handled in-place, and
 system-bar icon appearance follows the reader theme.
+The native navigation-bar inset also keeps statistics, drawers and mobile sheets
+above Android's gesture/button navigation area.
 
 The Android session backs up baseline text, unsaved edits, mode, caret, editor
 scroll, reading position and active document. Backups are debounced by 250 ms and

@@ -23,6 +23,7 @@ async function click(label) {
 async function back() { adb("shell", "input", "keyevent", "4"); await delay(700); }
 async function native(action, payload={}) { return c.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:android-documents|execute',${JSON.stringify({action,payload})})`); }
 if (process.argv.includes("--prepare")) {
+  for(let retry=0;retry<60&&!await c.evaluate("[...document.querySelectorAll('button')].some(b=>b.innerText==='Browse Files')");retry++)await delay(250);
   await click("Browse Files"); await delay(600);
   await tap("Show roots"); await tap(adb("shell", "getprop", "ro.product.model").toString().trim());
   await tap("Download"); await tap("MDHeroTests"); await tap("guide.md"); await delay(1600);

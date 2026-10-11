@@ -69,10 +69,21 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
         if (::view.isInitialized) view.evaluateJavascript("window.dispatchEvent(new Event('mdhero-pause'))", null)
     }
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        if (::view.isInitialized) view.settings.textZoom = (newConfig.fontScale * 100).toInt().coerceIn(80, 200)
+        if (::view.isInitialized) {
+            view.settings.textZoom = (newConfig.fontScale * 100).toInt().coerceIn(80, 200)
+            updateInsets()
+        }
     }
     override fun onResume() {
-        if (::view.isInitialized) view.post { view.evaluateJavascript("window.dispatchEvent(new Event('mdhero-resume'))", null) }
+        if (::view.isInitialized) view.post { updateInsets(); view.evaluateJavascript("window.dispatchEvent(new Event('mdhero-resume'))", null) }
+    }
+    private fun updateInsets() {
+        view.post {
+            val insets = view.rootWindowInsets ?: return@post
+            val bottom = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets, view)
+                .getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars()).bottom / activity.resources.displayMetrics.density
+            view.evaluateJavascript("document.documentElement.style.setProperty('--android-bottom', '${bottom}px')", null)
+        }
     }
     private fun receiveIntent(intent: Intent) {
         val uris = when (intent.action) {
@@ -326,6 +337,7 @@ class DocumentsPlugin(private val activity: Activity) : Plugin(activity) {
             val controller = androidx.core.view.WindowInsetsControllerCompat(activity.window, view)
             controller.isAppearanceLightStatusBars = !args.dark
             controller.isAppearanceLightNavigationBars = !args.dark
+            updateInsets()
             invoke.resolve(JSObject())
         }
     }
