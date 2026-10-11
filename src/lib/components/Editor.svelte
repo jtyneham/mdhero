@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
+  import { isAndroid } from "$lib/utils/platform";
+  import { tabStore } from "$lib/stores/tabs";
   import { searchQuery, searchActiveIndex, searchTotal } from "$lib/stores/search";
   import { findMatches, buildHighlightHtml } from "$lib/utils/text-search";
   import { gutterHtml as buildGutterHtml, gutterWidth as buildGutterWidth, lineCount as countLines } from "$lib/utils/line-gutter";
@@ -72,6 +74,10 @@
   });
 
   function syncBackdropScroll() {
+    if (isAndroid && textareaEl) {
+      const tab = tabStore.getActiveTab();
+      if (tab) tabStore.saveEditorPosition(tab.id, textareaEl.scrollTop, textareaEl.selectionStart, textareaEl.selectionEnd);
+    }
     if (backdropEl && textareaEl) {
       backdropEl.scrollTop = textareaEl.scrollTop;
       backdropEl.scrollLeft = textareaEl.scrollLeft;
@@ -97,7 +103,12 @@
   });
 
   onMount(() => {
+    const saved = tabStore.getActiveTab();
     tick().then(() => {
+      if (isAndroid && textareaEl && saved) {
+        textareaEl.scrollTop = saved.editorScrollTop ?? 0;
+        textareaEl.setSelectionRange(saved.selectionStart ?? 0, saved.selectionEnd ?? saved.selectionStart ?? 0);
+      }
       try {
         textareaEl?.focus({ preventScroll: true });
       } catch {
@@ -122,6 +133,7 @@
   function updateActiveLine() {
     if (!textareaEl) return;
     activeLine = localValue.slice(0, textareaEl.selectionStart).split("\n").length - 1;
+    if (isAndroid) syncBackdropScroll();
   }
 
   function handleInput() {
@@ -178,6 +190,7 @@
       onkeyup={updateActiveLine}
       onclick={updateActiveLine}
       onfocus={updateActiveLine}
+      onselect={updateActiveLine}
       onscroll={syncBackdropScroll}
       class="editor"
       class:with-gutter={showLineNumbers}

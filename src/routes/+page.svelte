@@ -54,6 +54,22 @@
   import { gutterHtml, gutterWidth, lineCount } from "$lib/utils/line-gutter";
   import { createWheelZoom } from "$lib/utils/wheel-zoom";
   import { saveProgress, getProgress } from "$lib/stores/readingProgress";
+  import { isAndroid } from "$lib/utils/platform";
+  import MobileToolbar from "$lib/components/MobileToolbar.svelte";
+  import { native, documentName, printDocumentNative } from "$lib/tauri/android";
+  import { initDraftPersistence, restoreMobileDrafts, persistDrafts } from "$lib/tauri/drafts";
+  import { reloadFile } from "$lib/tauri/files";
+
+  let mobilePanel = $state<"menu" | "documents" | "preferences" | null>(null);
+
+  async function askToKeepEditing(message: string, title: string, destructiveLabel: string): Promise<boolean> {
+    if (isAndroid) {
+      const result = await native<{confirmed: boolean}>("confirm", { name: title, content: message, confirmLabel: destructiveLabel });
+      return !result.confirmed; // Back/outside dismissal always retains edits.
+    }
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    return ask(message, { title, kind: "warning", okLabel: "Keep Editing", cancelLabel: destructiveLabel });
+  }
 
   let rendererReady = $state(false);
   let searchVisible = $state(false);
@@ -178,8 +194,10 @@
   let activeTab = $derived<Tab | null>($tabs.find((t) => t.id === $activeTabId) ?? null);
   let canEditActive = $derived(
     !!activeTab?.filePath
-    && !activeTab.filePath.startsWith("paste://")
+    && (isAndroid || (
+    !activeTab.filePath.startsWith("paste://")
     && !activeTab.filePath.startsWith("url://")
+    ))
   );
   let currentMode = $derived<ViewMode>(
     activeTab?.isEditing ? "editor" : rawMode ? "raw" : "viewer"
@@ -297,7 +315,7 @@
         docStore.set({
           filePath: activeTab.filePath,
           fileName: activeTab.fileName,
-          content: activeTab.content,             // disk content (unchanged)
+          content: activeTab.editContent,
           renderedHtml: result.html,              // preview of unsaved edits
           frontmatter: result.frontmatter,
           wordCount: result.wordCount,
@@ -327,24 +345,30 @@
       let targetName = tab.fileName;
       // An unsaved `new://` document has no location yet — prompt for one on
       // this first save, which rebinds the tab to the chosen real path (#63).
-      if (tab.filePath.startsWith("new://")) {
+      if (tab.filePath.startsWith("new://") || (isAndroid && !tab.filePath.startsWith("content://"))) {
         const saved = await saveAsNewDocument(tab.id, tab.editContent);
         if (!saved) return; // cancelled — keep editing, stays dirty
         targetPath = saved;
-        targetName = basename(saved);
+        targetName = documentName(saved) ?? basename(saved);
       } else {
         if (tab.diskChanged) {
           // The file changed on disk while these edits were unsaved (#97).
           // Same convention as the close dialog: the default button is the
           // safe one, so a reflexive Return keeps editing.
-          const { ask } = await import("@tauri-apps/plugin-dialog");
-          const keepEditing = await ask(
+          const keepEditing = await askToKeepEditing(
             `${tab.fileName} changed on disk while you were editing. Saving will overwrite that version.`,
-            { title: "File changed on disk", kind: "warning", okLabel: "Keep Editing", cancelLabel: "Overwrite" }
+            "File changed on disk", "Overwrite"
           );
           if (keepEditing) return;
         }
-        await saveFile(tab.filePath, tab.editContent);
+        try {
+          await saveFile(tab.filePath, tab.editContent, isAndroid ? tab.content : undefined);
+        } catch (error) {
+          if (!isAndroid || !String(error).includes("CONFLICT:")) throw error;
+          const keep = await askToKeepEditing("The original document changed outside MDHero. Saving will overwrite it.", "Document changed", "Overwrite");
+          if (keep) return;
+          await saveFile(tab.filePath, tab.editContent);
+        }
       }
       const baseDir = getBaseDir(targetPath);
       const result = renderFull(tab.editContent, baseDir);
@@ -384,6 +408,13 @@
    */
   async function handleLocalLink(href: string) {
     const tab = activeTab;
+    if (isAndroid && tab?.filePath.startsWith("content://")) {
+      try {
+        const target = await native<{uri: string; name: string; text: boolean}>("resolve", { uri: tab.filePath, relative: href.replace(/[?#].*$/, "") });
+        if (target.text) await openFile(target.uri); else await openWithSystem(target.uri);
+      } catch (error) { showToast(String(error)); }
+      return;
+    }
     // paste:// and url:// tabs have no real base dir to resolve against — keep
     // the prior external-opener behavior for their links.
     if (!tab || !tab.filePath || tab.filePath.startsWith("paste://") || tab.filePath.startsWith("url://") || tab.filePath.startsWith("new://")) {
@@ -454,6 +485,7 @@
   // states; splitMode is the only difference. Routed through switchMode so the
   // source-line position is preserved across the change.
   function setMode(target: "view" | "split" | "edit") {
+    if (isAndroid && target === "split") target = "edit";
     if (!activeTab) return;
     if (target === "view") {
       splitMode = false;
@@ -488,17 +520,11 @@
     // WKWebView (silently returns false), which made this guard dead and closed
     // dirty tabs without warning.
     if (t.dirty) {
-      const { ask } = await import("@tauri-apps/plugin-dialog");
       // The primary/default button (Enter) must be the SAFE action, so a
       // reflexive Return can't destroy unsaved work. `ask`'s OK button is the
       // default, so OK = "Keep Editing" and the cancel-position button is the
       // deliberate, non-default "Discard".
-      const keepEditing = await ask(`You have unsaved changes to ${t.fileName}.`, {
-        title: "Unsaved changes",
-        kind: "warning",
-        okLabel: "Keep Editing",
-        cancelLabel: "Discard",
-      });
+      const keepEditing = await askToKeepEditing(`You have unsaved changes to ${t.fileName}.`, "Unsaved changes", "Discard");
       if (keepEditing) return false;
     }
     // Flush reading progress before closing — catches the case where user
@@ -528,7 +554,7 @@
     if (!$docStore.renderedHtml || activeTab?.isEditing) return;
     printInFlight = true;
     try {
-      window.print();
+      void printDocumentNative($docStore.fileName ?? "MDHero").catch(e => showToast(String(e)));
     } finally {
       // window.print() is modal on every platform we ship, so by the time it
       // returns the dialog has been dismissed; a short hold covers the
@@ -538,6 +564,69 @@
   }
 
   let closeInFlight = false;
+
+  async function mobileSaveAs() {
+    const tab = activeTab;
+    if (!tab) return;
+    try {
+      const content = tab.dirty ? tab.editContent : tab.content;
+      const path = await saveAsNewDocument(tab.id, content);
+      if (!path) return;
+      tabStore.updateEditContent(tab.id, content);
+      tabStore.markSaved(tab.id);
+      await reloadFile(path);
+      showToast("Document saved");
+    } catch (error) { showToast(`Save As failed: ${error}`); }
+  }
+
+  function mobileBack() {
+    if (lightboxVisible) { lightboxVisible = false; return; }
+    if (customPromptVisible) { customPromptVisible = false; return; }
+    if (aboutVisible) { aboutVisible = false; return; }
+    if (settingsVisible) { settingsVisible = false; return; }
+    if (pasteVisible) { pasteVisible = false; return; }
+    if (openVisible) { openVisible = false; return; }
+    if (mobilePanel) { mobilePanel = null; return; }
+    if ($tocVisible) { tocVisible.set(false); return; }
+    if (searchVisible) { searchVisible = false; return; }
+    if (presenting) { presenting = false; return; }
+    if (zenMode) { zenMode = false; return; }
+    if (activeTab?.isEditing || rawMode) { switchMode("viewer"); persistDrafts(); return; }
+    if ($activeTabId !== HOME_TAB_ID) { saveProgressNow(); tabStore.goHome(); persistDrafts(); return; }
+    persistDrafts();
+    void native("background");
+  }
+
+  let handlingPending = false;
+  async function openPendingDocuments() {
+    if (handlingPending) return;
+    handlingPending = true;
+    try {
+      const result = await native<{uris: string[]}>("pending");
+      for (const uri of result.uris) await openFile(uri);
+    } finally { handlingPending = false; }
+  }
+  async function refreshAndroidDocuments() {
+    for (const tab of get(tabs)) if (tab.filePath.startsWith("content://")) await reloadFile(tab.filePath);
+    await openPendingDocuments();
+  }
+  onMount(() => {
+    if (!isAndroid) return;
+    const disposeDrafts = initDraftPersistence();
+    const updateViewport = () => document.documentElement.style.setProperty("--visual-height", `${window.visualViewport?.height ?? window.innerHeight}px`);
+    updateViewport();
+    window.visualViewport?.addEventListener("resize", updateViewport);
+    window.addEventListener("mdhero-back", mobileBack);
+    window.addEventListener("mdhero-open", openPendingDocuments);
+    window.addEventListener("mdhero-resume", refreshAndroidDocuments);
+    const pause = () => { saveProgressNow(); persistDrafts(); };
+    window.addEventListener("mdhero-pause", pause);
+    return () => {
+      disposeDrafts(); window.visualViewport?.removeEventListener("resize", updateViewport);
+      window.removeEventListener("mdhero-back", mobileBack); window.removeEventListener("mdhero-open", openPendingDocuments); window.removeEventListener("mdhero-resume", refreshAndroidDocuments);
+      window.removeEventListener("mdhero-pause", pause);
+    };
+  });
   async function closeActiveTab() {
     if (closeInFlight) return;
     closeInFlight = true;
@@ -696,7 +785,10 @@
     void (async () => {
       // Bring back last run's tabs first (#72), so a file opened via "Open
       // With" or the CLI below lands on top of them as the active tab.
-      if ($settings.restoreTabsOnLaunch) {
+      if (isAndroid) {
+        await restoreMobileDrafts();
+        await openPendingDocuments();
+      } else if ($settings.restoreTabsOnLaunch) {
         try {
           await restoreSession();
         } catch {}
@@ -872,6 +964,13 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (isAndroid && e.key === "Escape") { e.preventDefault(); mobileBack(); return; }
+    // Android has no native desktop menu to consume these accelerators.
+    if (isAndroid && (e.metaKey || e.ctrlKey)) {
+      if (!e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); void openFileDialog(); return; }
+      if (e.shiftKey && e.key.toLowerCase() === "v") { e.preventDefault(); pasteDefaultMode = "paste"; pasteVisible = true; return; }
+      if (e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); tocVisible.update(v => !v); return; }
+    }
     // Cmd+1-9 tab switching
     if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "9") {
       e.preventDefault();
@@ -1119,7 +1218,7 @@
       });
       tocVisible.set(false);
       tocEntries.set([]);
-      getCurrentWindow().setTitle("MDHero").catch(() => {});
+      if (!isAndroid) getCurrentWindow().setTitle("MDHero").catch(() => {});
       return;
     }
 
@@ -1129,8 +1228,8 @@
     docStore.set({
       filePath: tab.filePath,
       fileName: tab.fileName,
-      content: tab.content,
-      renderedHtml: tab.renderedHtml,
+      content: tab.dirty ? tab.editContent : tab.content,
+      renderedHtml: tab.dirty ? renderFull(tab.editContent, getBaseDir(tab.filePath)).html : tab.renderedHtml,
       frontmatter: tab.frontmatter,
       wordCount: tab.wordCount,
       loading: false,
@@ -1141,7 +1240,7 @@
     // mid-edit (#44). Runs once per tab switch, so an explicit exit (Esc) sticks.
     presenting = isMarpDoc(tab.frontmatter) && get(settings).autoPresentMarp && !tab.isEditing;
 
-    getCurrentWindow().setTitle(`${tab.fileName} — MDHero`).catch(() => {});
+    if (!isAndroid) getCurrentWindow().setTitle(`${tab.fileName} — MDHero`).catch(() => {});
 
     const savedScroll = tab.scrollTop;
     tick().then(() => {
@@ -1161,6 +1260,14 @@
 <div class="min-h-screen transition-colors page-root">
   {#if !zenMode}
     <ProgressBar />
+    {#if isAndroid}
+      <MobileToolbar bind:panel={mobilePanel} mode={currentMode} dirty={activeTab?.dirty ?? false}
+        onMode={switchMode} onSave={() => activeTab && handleSave(activeTab)} onSaveAs={mobileSaveAs}
+        onSearch={() => searchVisible = true} onSettings={() => settingsVisible = true}
+        onPaste={() => { pasteDefaultMode = "paste"; pasteVisible = true; }} onUrl={() => { pasteDefaultMode = "url"; pasteVisible = true; }}
+        onClose={handleCloseTab} onZen={() => zenMode = true} onPresent={togglePresent} canPresent={activeIsMarp}
+        onAI={() => { customPromptSelection = window.getSelection()?.toString() ?? ""; customPromptVisible = true; }} onAbout={() => aboutVisible = true} />
+    {:else}
     <Toolbar
       onOpen={() => (openVisible = true)}
       onPaste={() => { pasteDefaultMode = "paste"; pasteVisible = true; }}
@@ -1179,9 +1286,15 @@
       onTogglePresent={togglePresent}
     />
     <TabBar onCloseTab={handleCloseTab} />
+    {/if}
+  {:else if isAndroid}
+    <button class="zen-exit print:hidden" onclick={() => zenMode = false} aria-label="Exit distraction-free reading">×</button>
   {/if}
-  <DropZone />
+  {#if !isAndroid}<DropZone />{/if}
   {#if !zenMode && !activeTab?.isEditing}
+    {#if isAndroid && $tocVisible && $tocEntries.length}
+      <button class="toc-shade print:hidden" aria-label="Close table of contents" onclick={() => tocVisible.set(false)}></button>
+    {/if}
     <TableOfContents />
   {/if}
   <SearchOverlay bind:visible={searchVisible} />
@@ -1303,6 +1416,8 @@
 </div>
 
 <style>
+  .zen-exit { position: fixed; top: 8px; right: 8px; z-index: 35; width: 44px; height: 44px; background: rgba(128,128,128,.12); border-radius: 5px; }
+  .toc-shade { position: fixed; inset: var(--mobile-header, 88px) 0 0; z-index: 38; background: rgba(0,0,0,.25); width: 100%; }
   .page-root {
     background: #fafafa;
     color: #1c1c1e;

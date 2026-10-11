@@ -8,18 +8,23 @@ import { renderFull } from "../renderer/pipeline";
 import { addRecentFile } from "../stores/recents";
 import { pinnedFolders } from "../stores/pinned";
 import { basename } from "../utils/path";
+import { isAndroid } from "../utils/platform";
+import { native, readAndroidDocument, documentName, rememberDocumentName } from "./android";
+import { showToast } from "../stores/toast";
 
 export async function readMarkdownFile(path: string): Promise<string> {
+  if (isAndroid) return (await readAndroidDocument(path)).content;
   return invoke<string>("read_markdown_file", { path });
 }
 
-export async function saveFile(path: string, content: string): Promise<void> {
+export async function saveFile(path: string, content: string, expected?: string): Promise<void> {
+  if (isAndroid) { await native("write", { uri: path, content, expected }); return; }
   await invoke("write_markdown_file", { path, content });
 }
 
 export async function openFile(path: string): Promise<void> {
   const absolutePath = await resolvePath(path);
-  const fileName = basename(absolutePath);
+  let fileName = documentName(absolutePath) ?? basename(absolutePath);
   const baseDir = getBaseDir(absolutePath);
 
   document.set({
@@ -35,7 +40,8 @@ export async function openFile(path: string): Promise<void> {
 
   try {
     const content = await readMarkdownFile(absolutePath);
-    const result = renderFull(content, baseDir);
+    fileName = documentName(absolutePath) ?? fileName;
+    let result = renderFull(content, baseDir);
 
     // Whitelist the document's local images with the asset protocol before the
     // HTML hits the DOM, so images outside the static $HOME scope load (#31).
@@ -48,10 +54,14 @@ export async function openFile(path: string): Promise<void> {
     // user can start writing, instead of staring at a blank viewer (#52).
     if (content.trim() === "") tabStore.setEditing(tabId, true);
 
+    const draft = isAndroid ? tabStore.getActiveTab() : null;
+    const visibleContent = draft?.dirty ? draft.editContent : content;
+    if (draft?.dirty) result = renderFull(visibleContent, baseDir);
+
     document.set({
       filePath: absolutePath,
       fileName,
-      content,
+      content: visibleContent,
       renderedHtml: result.html,
       frontmatter: result.frontmatter,
       wordCount: result.wordCount,
@@ -60,7 +70,7 @@ export async function openFile(path: string): Promise<void> {
     });
 
     addRecentFile(absolutePath, fileName);
-    getCurrentWindow().setTitle(`${fileName} — MDHero`).catch(() => {});
+    if (!isAndroid) getCurrentWindow().setTitle(`${fileName} — MDHero`).catch(() => {});
   } catch (err) {
     document.set({
       filePath: absolutePath,
@@ -105,24 +115,30 @@ export function newDocument(): void {
  * dialog (caller should leave the tab dirty and in the editor).
  */
 export async function saveAsNewDocument(tabId: string, content: string): Promise<string | null> {
-  const chosen = await save({
+  const tab = isAndroid ? get(tabStore.tabs).find(t => t.id === tabId) : null;
+  const chosen = isAndroid ? (await native<{uris: string[]}>("create", { name: tab?.fileName === "Untitled" ? "Untitled.md" : tab?.fileName ?? "Untitled.md" })).uris[0] : await save({
     defaultPath: "Untitled.md",
     filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "mkd"] }],
   });
   if (!chosen) return null;
 
-  const fileName = basename(chosen);
+  let fileName = basename(chosen);
+  if (isAndroid) {
+    const info = await native<{name: string}>("stat", { uri: chosen });
+    fileName = info.name;
+    rememberDocumentName(chosen, fileName);
+  }
   await saveFile(chosen, content);
   tabStore.rebindPath(tabId, chosen, fileName);
   watchFile(chosen);
   addRecentFile(chosen, fileName);
-  getCurrentWindow().setTitle(`${fileName} — MDHero`).catch(() => {});
+  if (!isAndroid) getCurrentWindow().setTitle(`${fileName} — MDHero`).catch(() => {});
   return chosen;
 }
 
 export async function openFileDialog(): Promise<void> {
   try {
-    const selected = await open({
+    const selected = isAndroid ? (await native<{uris: string[]}>("pick")).uris : await open({
       multiple: true,
       filters: [
         {
@@ -143,6 +159,7 @@ export async function openFileDialog(): Promise<void> {
     }
   } catch (err) {
     console.error("File dialog error:", err);
+    showToast(`Could not open document: ${err}`);
   }
 }
 
@@ -158,8 +175,8 @@ export async function reloadFile(path: string): Promise<void> {
     const absolutePath = await resolvePath(path);
     const content = await readMarkdownFile(absolutePath);
     const baseDir = getBaseDir(absolutePath);
-    const result = renderFull(content, baseDir);
-    const fileName = basename(absolutePath);
+    let result = renderFull(content, baseDir);
+    const fileName = documentName(absolutePath) ?? basename(absolutePath);
 
     await allowAssets(result.assetPaths, absolutePath);
 
@@ -167,10 +184,14 @@ export async function reloadFile(path: string): Promise<void> {
 
     if (tabStore.getActiveTab()?.filePath !== absolutePath) return;
 
+    const draft = isAndroid ? tabStore.getActiveTab() : null;
+    const visibleContent = draft?.dirty ? draft.editContent : content;
+    if (draft?.dirty) result = renderFull(visibleContent, baseDir);
+
     document.set({
       filePath: absolutePath,
       fileName,
-      content,
+      content: visibleContent,
       renderedHtml: result.html,
       frontmatter: result.frontmatter,
       wordCount: result.wordCount,
@@ -179,6 +200,7 @@ export async function reloadFile(path: string): Promise<void> {
     });
   } catch (err) {
     console.error("Failed to reload file:", err);
+    if (isAndroid) showToast("Document access is unavailable. Your edits are kept; use Save As or select the document again.");
   }
 }
 
@@ -192,28 +214,33 @@ export function isWatchablePath(path: string): boolean {
 
 /** Ask the backend to deliver `file-changed` events for this file (#97). */
 export function watchFile(path: string): void {
+  if (isAndroid) return;
   if (!isWatchablePath(path)) return;
   invoke("watch_file", { path }).catch(() => {});
 }
 
 /** Stop events for this file; the directory watch is released with its last file. */
 export function unwatchFile(path: string): void {
+  if (isAndroid) return;
   if (!isWatchablePath(path)) return;
   invoke("unwatch_file", { path }).catch(() => {});
 }
 
 export function getBaseDir(path: string): string {
+  if (path.startsWith("content://")) return path;
   const normalized = path.replace(/\\/g, "/");
   const idx = normalized.lastIndexOf("/");
   return idx >= 0 ? normalized.slice(0, idx) : ".";
 }
 
 export async function resolvePath(path: string): Promise<string> {
+  if (isAndroid) return path;
   return invoke<string>("resolve_path", { path });
 }
 
 /** Whether a path exists on disk (for the local-file-link existence check, #30). */
 export async function pathExists(path: string): Promise<boolean> {
+  if (isAndroid) { try { await native("stat", { uri: path }); return true; } catch { return false; } }
   return invoke<boolean>("path_exists", { path });
 }
 
@@ -224,6 +251,7 @@ export async function pathExists(path: string): Promise<boolean> {
  * executable/script extensions before reaching this function.
  */
 export async function openWithSystem(path: string): Promise<void> {
+  if (isAndroid) { await native("share", { uri: path }); return; }
   const { openPath } = await import("@tauri-apps/plugin-opener");
   await openPath(path);
 }
@@ -233,6 +261,7 @@ export async function openWithSystem(path: string): Promise<void> {
  * file selected. Throws if the file is no longer there.
  */
 export async function revealInFileManager(path: string): Promise<void> {
+  if (isAndroid) { await native("share", { uri: path }); return; }
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   await revealItemInDir(path);
 }
@@ -247,6 +276,7 @@ export async function revealInFileManager(path: string): Promise<void> {
  * not — so errors are swallowed.
  */
 export async function allowAssets(paths: string[], documentPath: string): Promise<void> {
+  if (isAndroid) return;
   if (paths.length === 0) return;
   try {
     const rejected = await invoke<string[]>("allow_assets", {

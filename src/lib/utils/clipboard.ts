@@ -1,10 +1,13 @@
 import { basename } from "./path";
+import { isAndroid } from "./platform";
+import { native } from "../tauri/android";
 
 /**
  * Copy rendered HTML as rich text using selection-based approach.
  * Works reliably in Tauri webviews where ClipboardItem may not be supported.
  */
 export async function copyAsRichText(html: string, _markdown: string): Promise<boolean> {
+  if (isAndroid) { try { await native("copy", { html, content: _markdown }); return true; } catch { return false; } }
   try {
     // Create a temporary container with the rendered HTML
     const container = document.createElement("div");
@@ -51,6 +54,7 @@ export async function copyAsRichText(html: string, _markdown: string): Promise<b
  * Copy raw markdown source to clipboard.
  */
 export async function copyAsMarkdown(markdown: string): Promise<boolean> {
+  if (isAndroid) { try { await native("copy", { content: markdown }); return true; } catch { return false; } }
   try {
     await navigator.clipboard.writeText(markdown);
     return true;

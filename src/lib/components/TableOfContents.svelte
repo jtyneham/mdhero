@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
+  import { isAndroid } from "../utils/platform";
   import { get } from "svelte/store";
   import { tocEntries, activeHeadingId, tocVisible, setActiveHeading } from "$lib/stores/toc";
   import {
@@ -160,6 +161,7 @@
   onDestroy(() => endGesture(true));
 
   function scrollToHeading(id: string) {
+    if (isAndroid) tocVisible.set(false);
     setActiveHeading(id);
     const el = document.getElementById(id);
     if (el) {

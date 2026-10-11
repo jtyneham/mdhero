@@ -1,8 +1,17 @@
 import { writable, get } from "svelte/store";
+import { isAndroid } from "../utils/platform";
+import { native } from "../tauri/android";
 
 export type ThemeMode = "light" | "dark" | "system";
 
-export const themeMode = writable<ThemeMode>("system");
+function savedTheme(): ThemeMode {
+  try {
+    const value = localStorage.getItem("mdhero-theme");
+    return value === "light" || value === "dark" ? value : "system";
+  } catch { return "system"; }
+}
+export const themeMode = writable<ThemeMode>(savedTheme());
+themeMode.subscribe(value => { try { localStorage.setItem("mdhero-theme", value); } catch {} });
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
@@ -27,6 +36,7 @@ export function applyCurrentTheme(): void {
   } else {
     html.classList.remove("dark");
   }
+  if (isAndroid) void native("appearance", { dark: theme === "dark" }).catch(() => {});
 }
 
 export function initThemeListener(): void {

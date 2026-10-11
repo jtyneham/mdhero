@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { fetchDocumentUrl } from "$lib/tauri/android";
   import { MOD } from "$lib/utils/platform";
   import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
   import { openFile, openFileDialog } from "$lib/tauri/files";
@@ -66,7 +67,7 @@
     urlError = "";
     try {
       const rawUrl = toRawUrl(trimmed);
-      const res = await fetch(rawUrl);
+      const res = await fetchDocumentUrl(rawUrl);
       if (!res.ok) {
         urlError = res.status === 404 ? "File not found." : res.status === 403 ? "Access denied." : `Failed (${res.status})`;
         urlLoading = false;

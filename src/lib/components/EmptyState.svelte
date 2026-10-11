@@ -1,5 +1,8 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { isAndroid } from "../utils/platform";
+  import { pickFolder, listFolderFiles, documentName } from "../tauri/android";
+  import { showToast } from "../stores/toast";
   import { MOD } from "$lib/utils/platform";
   import { open } from "@tauri-apps/plugin-dialog";
   import { openFileDialog, openFile, newDocument } from "../tauri/files";
@@ -40,16 +43,17 @@
   }
 
   $effect(() => {
-    invoke<PlanFile[]>("list_claude_plans").then((p) => { plans = p; }).catch(() => {});
+    if (!isAndroid) invoke<PlanFile[]>("list_claude_plans").then((p) => { plans = p; }).catch(() => {});
   });
 
   $effect(() => {
     const folders = $pinnedFolders;
     for (const folder of folders) {
       if (!(folder in folderFiles)) {
-        invoke<MdFile[]>("list_folder_md_files", { folder }).then((files) => {
+        listFolderFiles(folder).then((files) => {
           folderFiles = { ...folderFiles, [folder]: files };
-        }).catch(() => {
+        }).catch((error) => {
+          if (isAndroid) showToast(`Folder access unavailable. Pin it again: ${error}`);
           folderFiles = { ...folderFiles, [folder]: [] };
         });
       }
@@ -58,14 +62,14 @@
 
   async function addPinnedFolder() {
     try {
-      const selected = await open({ directory: true, multiple: false });
+      const selected = await pickFolder();
       if (selected && typeof selected === "string") {
         pinnedFolders.add(selected);
-        invoke<MdFile[]>("list_folder_md_files", { folder: selected }).then((files) => {
+        listFolderFiles(selected).then((files) => {
           folderFiles = { ...folderFiles, [selected]: files };
         }).catch(() => {});
       }
-    } catch {}
+    } catch (error) { showToast(`Could not pin folder: ${error}`); }
   }
 
   function removePinnedFolder(e: MouseEvent, path: string) {
@@ -201,7 +205,7 @@
           <div class="section-header">
             <h2 class="section-title">
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4.5l3-2.5h8v9H1.5V4.5z"/><line x1="1.5" y1="4.5" x2="4.5" y2="4.5"/></svg>
-              {basename(folder)}
+              {documentName(folder) ?? basename(folder)}
             </h2>
             <span class="section-count">{folderFiles[folder]?.length ?? '...'}</span>
             <button class="section-action unpin" onclick={(e) => removePinnedFolder(e, folder)} title="Unpin">

@@ -8,6 +8,10 @@
   import mermaid from "mermaid";
   import DOMPurify from "dompurify";
   import { MERMAID_SANITIZE_CONFIG } from "$lib/renderer/mermaid-sanitize";
+  import { isAndroid } from "$lib/utils/platform";
+  import { native } from "$lib/tauri/android";
+  import { document as docStore } from "$lib/stores/document";
+  import { copyAsMarkdown } from "$lib/utils/clipboard";
 
   let {
     html = "",
@@ -105,6 +109,10 @@
         // because the Quick Look extension renders diagrams too and the two
         // paths must not drift apart; see the notes there before changing it.
         container.innerHTML = DOMPurify.sanitize(svg, MERMAID_SANITIZE_CONFIG);
+        if (isAndroid) container.addEventListener("click", () => {
+          const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(container.innerHTML)}`;
+          onImageClick(image, [image], 0);
+        });
         pre.replaceWith(container);
       } catch {
         // Leave the code block as-is if Mermaid fails
@@ -142,6 +150,7 @@
   // to Rust (no urlTemplate, no prompt template body — those stay
   // frontend-side; Rust only needs id/name to build the menu).
   function handleContextMenu(e: MouseEvent) {
+    if (isAndroid) return;
     e.preventDefault();
     const selection = window.getSelection()?.toString() ?? "";
     setPendingSelection(selection);
@@ -192,6 +201,7 @@
 
       // Add image click handlers for lightbox
       addImageClickHandlers();
+      if (isAndroid) void loadAndroidImages();
 
       // Add link hover tooltips
       addLinkTooltips();
@@ -207,16 +217,32 @@
   function addImageClickHandlers() {
     if (!articleEl) return;
     const imgs = articleEl.querySelectorAll("img");
-    const allSrcs = Array.from(imgs).map((img) => img.src).filter(Boolean);
 
     imgs.forEach((img, idx) => {
       if (img.dataset.lightboxBound) return;
       img.dataset.lightboxBound = "true";
       img.style.cursor = "zoom-in";
       img.addEventListener("click", () => {
-        onImageClick(img.src, allSrcs, idx);
+        onImageClick(img.src, Array.from(imgs).map((image) => image.src), idx);
       });
     });
+  }
+
+  async function loadAndroidImages() {
+    const uri = get(docStore).filePath;
+    if (!uri?.startsWith("content://") || !articleEl) return;
+    for (const img of Array.from(articleEl.querySelectorAll("img"))) {
+      const relative = img.getAttribute("src") ?? "";
+      if (!relative || /^(https?:|data:|blob:)/i.test(relative)) continue;
+      try {
+        const result = await native<{data: string}>("asset", { uri, relative });
+        if (!img.isConnected) continue;
+        img.src = result.data;
+        img.removeAttribute("srcset");
+      } catch {
+        img.title = "Pin this document's folder to allow its relative images";
+      }
+    }
   }
 
   function addLinkTooltips() {
@@ -298,8 +324,8 @@
       btn.addEventListener("click", () => {
         const code = pre.querySelector("code");
         const text = code?.textContent ?? pre.textContent ?? "";
-        navigator.clipboard.writeText(text).then(() => {
-          btn.textContent = "Copied!";
+        copyAsMarkdown(text).then((success) => {
+          btn.textContent = success ? "Copied!" : "Could not copy";
           setTimeout(() => (btn.textContent = "Copy"), 1500);
         });
       });

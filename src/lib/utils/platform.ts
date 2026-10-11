@@ -20,3 +20,5 @@ export function modifierKeyLabel(
 
 /** The label for this session's platform, resolved once at module load. */
 export const MOD = modifierKeyLabel();
+
+export const isAndroid = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);

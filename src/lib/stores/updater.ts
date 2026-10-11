@@ -1,5 +1,6 @@
 import { writable, get } from "svelte/store";
 import { getVersion } from "@tauri-apps/api/app";
+import { isAndroid } from "../utils/platform";
 
 function detectOS(): string {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -84,6 +85,7 @@ async function fetchFallback(): Promise<UpdateInfo | null> {
  * @param force - when true, bypass the 24h throttle (used by "Check for updates…" menu)
  */
 export async function checkForUpdates(force = false): Promise<void> {
+  if (isAndroid) return;
   if (import.meta.env.DEV && !force) return;
 
   if (!force) {

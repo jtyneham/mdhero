@@ -1,5 +1,6 @@
 <script lang="ts">
   import { isLlmEscaped, unescapeLlmOutput } from "$lib/utils/llm";
+  import { fetchDocumentUrl } from "$lib/tauri/android";
   import { MOD } from "$lib/utils/platform";
   import { isUrl, toRawUrl, urlToFileName } from "$lib/utils/url";
   import { renderFull } from "$lib/renderer/pipeline";
@@ -59,7 +60,7 @@
 
     try {
       const rawUrl = toRawUrl(trimmed);
-      const res = await fetch(rawUrl);
+      const res = await fetchDocumentUrl(rawUrl);
 
       if (!res.ok) {
         if (res.status === 404) {

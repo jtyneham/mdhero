@@ -1,5 +1,6 @@
 <script lang="ts">
   import { X } from "@lucide/svelte";
+  import { isAndroid } from "$lib/utils/platform";
   import { settings } from "$lib/stores/settings";
   import AILookupSettings from "./AILookupSettings.svelte";
 
@@ -32,7 +33,7 @@
         <section class="settings-section">
           <h3 class="section-title">Behavior</h3>
 
-          <label class="setting-row">
+          {#if !isAndroid}<label class="setting-row">
             <div class="setting-text">
               <span class="setting-label">Close on Escape</span>
               <span class="setting-hint">Press ESC to close the current tab. App quits after the last tab.</span>
@@ -43,7 +44,7 @@
               onchange={(e) => settings.update((s) => ({ ...s, closeOnEscape: e.currentTarget.checked }))}
               class="setting-switch"
             />
-          </label>
+          </label>{/if}
 
           <label class="setting-row">
             <div class="setting-text">
@@ -91,7 +92,7 @@
 
         <section class="settings-section">
           <h3 class="section-title">AI Lookup</h3>
-          <p class="section-hint">Right-click selected text in the viewer to send it to an AI tool. Manage providers and saved prompts below.</p>
+          <p class="section-hint">{isAndroid ? "Use More options → AI lookup to send selected text or a custom prompt. Manage providers below." : "Right-click selected text in the viewer to send it to an AI tool. Manage providers and saved prompts below."}</p>
           <AILookupSettings />
         </section>
       </div>

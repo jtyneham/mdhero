@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { reloadFile } from "./files";
 import { tabStore } from "../stores/tabs";
+import { isAndroid } from "../utils/platform";
 
 /**
  * Frontend half of live reload (#97). One listener for the whole session; the
@@ -21,6 +22,7 @@ const OWN_SAVE_SUPPRESSION_MS = 1500;
 const COALESCE_MS = 100;
 
 export function initFileWatcher(): Promise<void> {
+  if (isAndroid) return Promise.resolve();
   if (unlisten) return Promise.resolve();
   if (starting) return starting;
   starting = listen<{ path: string }>("file-changed", (event) => {
@@ -50,6 +52,7 @@ export function initFileWatcher(): Promise<void> {
  * JS listener would leave the Rust debouncer and its OS watch handles alive.
  */
 export function stopFileWatcher(): void {
+  if (isAndroid) return;
   for (const t of pending.values()) clearTimeout(t);
   pending.clear();
   if (unlisten) {

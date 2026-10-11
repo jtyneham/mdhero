@@ -19,6 +19,9 @@ export interface Tab {
    * Cleared by a save, or once the tab is no longer dirty.
    */
   diskChanged: boolean;
+  editorScrollTop?: number;
+  selectionStart?: number;
+  selectionEnd?: number;
 }
 
 export const HOME_TAB_ID = "__home__";
@@ -105,7 +108,7 @@ function createTabStore() {
         ts.map((t) => {
           if (t.id !== existing.id) return t;
           // Preserve edit state on re-add — only refresh content/render if not dirty
-          if (t.isEditing) {
+          if (t.isEditing || t.dirty) {
             const dirty = t.editContent !== content;
             return { ...t, content, renderedHtml, frontmatter: frontmatter ?? null, wordCount: wordCount ?? 0, dirty };
           }
@@ -191,7 +194,7 @@ function createTabStore() {
           wordCount: wordCount ?? t.wordCount,
         };
         // Preserve in-progress edits when content updates from external sources (file watcher)
-        if (t.isEditing) {
+        if (t.isEditing || t.dirty) {
           next.dirty = t.editContent !== content;
           // Remember that the disk moved under unsaved edits, so the tab can
           // show it and Save can ask first (#97). Not raised when the disk
@@ -211,6 +214,13 @@ function createTabStore() {
     const id = get(activeTabId);
     if (!id) return null;
     return get(tabs).find((t) => t.id === id) ?? null;
+  }
+
+  function restoreDraft(snapshot: Tab) {
+    tabs.update(ts => ts.map(t => t.filePath === snapshot.filePath ? { ...t, editContent: snapshot.editContent, dirty: snapshot.editContent !== t.content, isEditing: snapshot.isEditing, scrollTop: snapshot.scrollTop, editorScrollTop: snapshot.editorScrollTop, selectionStart: snapshot.selectionStart, selectionEnd: snapshot.selectionEnd, diskChanged: snapshot.content !== t.content && snapshot.editContent !== t.content } : t));
+  }
+  function saveEditorPosition(id: string, scrollTop: number, selectionStart: number, selectionEnd: number) {
+    tabs.update(ts => ts.map(t => t.id === id ? { ...t, editorScrollTop: scrollTop, selectionStart, selectionEnd } : t));
   }
 
   function reorderTabs(fromIndex: number, toIndex: number) {
@@ -283,6 +293,8 @@ function createTabStore() {
     rebindPath,
     saveScrollPosition,
     getSavedSession,
+    restoreDraft,
+    saveEditorPosition,
   };
 }
 

@@ -366,7 +366,7 @@ export function renderFull(markdown: string, baseDir?: string): RenderResult {
   });
 
   const assetPaths: string[] = [];
-  if (baseDir) {
+  if (baseDir && !baseDir.startsWith("content://")) {
     html = resolveRelativeImages(html, baseDir, assetPaths);
   }
 
