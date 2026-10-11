@@ -20,6 +20,19 @@ A beautiful, native Markdown viewer and lightweight editor for macOS, Windows an
 
 </div>
 
+## Android support in this fork
+
+This personal-use fork adds a portrait-only Android version of MDHero, retaining
+the original renderer, themes and reader/editor styling. It supports Android 8+
+ARM64 phones, SAF document opening and original-file saves, multiple documents,
+draft recovery, native Back gestures, sharing and Print / Save PDF.
+
+Build or install with [ANDROID_BUILD.md](ANDROID_BUILD.md). Architecture and
+desktop differences are described in [ANDROID_PORT.md](ANDROID_PORT.md), and
+executed checks in [ANDROID_TESTING.md](ANDROID_TESTING.md). Upstream desktop
+downloads and attribution below continue to refer to the original MDHero project;
+the Android APK is built by this fork and is larger than the desktop bundle.
+
 <table>
 <tr>
 <td><img src=".github/assets/hero-light.png" alt="MDHero Light Mode"></td>

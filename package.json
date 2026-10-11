@@ -11,6 +11,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "svelte-kit sync && vitest run",
     "tauri": "tauri",
+    "android:build": "node scripts/build-android.mjs",
     "quicklook": "node scripts/build-quicklook.mjs",
     "quicklook:appex": "./quicklook/build-appex.sh"
   },

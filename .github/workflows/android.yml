@@ -1,0 +1,55 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-port]
+    paths: [src/**, src-tauri/**, scripts/**, tests/**, package.json, pnpm-lock.yaml, .github/workflows/android.yml]
+  pull_request:
+    paths: [src/**, src-tauri/**, scripts/**, tests/**, package.json, pnpm-lock.yaml, .github/workflows/android.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - name: Build embedded debug APK and native tests
+        run: npm run android:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MDHero-Android-debug
+          path: artifacts/MDHero-Android-debug.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-build-logs
+          path: artifacts/*.log
