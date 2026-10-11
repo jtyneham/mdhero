@@ -57,6 +57,9 @@ Back cancellation retaining edits, the share chooser, native Print / Save PDF,
 and native Save As cancellation. The script restores the emulator's display,
 font and rotation settings on completion.
 
+The final installed APK passed all **38** scripted emulator assertions (24
+document/rendering checks and 14 layout/native checks).
+
 Additional completed provider operations:
 
 - Save As created `guide-copy.md` in the selected folder with the unsaved draft,
